@@ -1,0 +1,241 @@
+---
+title: "Predicting Car Sales Using k-NN Model"
+Author: "Sofiane Ikkour"
+output: html_document
+---
+
+
+#### **Context and goal:**
+
+In this project, we'll work on a dataset and use it to predict a car's market price using its various characteristics, including body style, engine type and horsepower. 
+
+The dataset is available at [the UCI Machine Learning Archive](https://archive.ics.uci.edu/ml/datasets/automobile). The dataset and its column names are described in the web site.
+
+
+**Note:** This code was written on RStudio.  
+**Language:** R.  
+**Packages:** readr, dplyr, stringr, tidyr, caret, ggplot2.  
+
+
+
+**Load and read the dataset**
+
+```{r}
+# load the relevant libraries
+library(readr)
+library(dplyr)
+library(stringr)
+library(tidyr)
+library(caret)
+library(ggplot2)
+
+# set the working directory
+setwd("C:/Users/Aylan/Documents/IT/DataQuest/R/Predicting Car Sales Using a KNN Model")
+
+# read the dataset
+cars <- read.table("imports-85.data", sep = ",")
+
+# display the first ten rows
+head(cars, 10)
+
+# print the dimension of the dataset
+print(dim(cars))
+```
+
+**Observations:**
+
+- We can notice that the dataset does not have column names. This means that we have to add them ourselves. We can do this using the attribute information available at [the UCI Machine Learning Archive](https://archive.ics.uci.edu/ml/datasets/automobile).   
+- The dataset has 205 rows and 26 columns.  
+
+Let's add the column names.
+
+```{r}
+# the column names are available at the UCI ML web site and we'll add them accordingly
+# create a vector to store each column name
+col_names <- c("symboling", "normalized_losses", "make", "fuel_type", "aspiration", "num_of_doors", "body_style", "drive_wheels", "engine_location", "wheel_base", "length", "width", "height", "curb_weight", "engine_type", "num_of_cylinders", "engine_size", "fuel_system", "bore", "stroke", "compression_ratio", "horsepower", "peak_rpm", "city_mpg", "highway_mpg", "price")
+
+# assign the column names to the dataset
+colnames(cars) <- col_names
+
+# display the first ten rows of the dataset 
+head(cars, 10)
+```
+
+**Data cleaning**
+
+Some character type columns in the dataset are not usable for our model because they cannot be converted into numeric. These columns are "make", "fuel_type", "aspiration", "body_style", "drive_wheels", "engine_location", "engine_type", and "fuel_system". Let's remove these columns.
+
+```{r}
+# remove the columns mentioned above
+cars <- cars %>%
+  select(-make, -fuel_type, -aspiration, -body_style, -drive_wheels, -engine_location, -engine_type,          -fuel_system)
+
+# the column num_of_doors and num_of_cylinders can be converted to numeric type by replacing 
+# each value by a corresponding numeric number
+# first let's list the unique values for each column
+print(unique(cars$num_of_doors))
+print(unique(cars$num_of_cylinders))
+```
+
+```{r}
+# replace the values of the column num_of_doors by numeric values
+cars$num_of_doors <- cars$num_of_doors %>%
+  str_replace_all("two", "2") %>%
+  str_replace_all("four", "4")
+
+# replace the values of the column num_of_cylinders by numeric values
+cars$num_of_cylinders <- cars$num_of_cylinders %>%
+  str_replace_all("four", "4") %>%
+  str_replace_all("six", "6") %>%
+  str_replace_all("five", "5") %>%
+  str_replace_all("three", "3") %>%
+  str_replace_all("twelve", "12") %>%
+  str_replace_all("two", "2") %>%
+  str_replace_all("eight", "8")
+
+# check the unique values again
+print(unique(cars$num_of_doors))
+print(unique(cars$num_of_cylinders))
+```
+
+```{r}
+# check the datatype of each column
+sapply(cars, typeof)
+```
+
+```{r}
+# convert every character type column into numeric column
+cars <- cars %>%
+  mutate(normalized_losses = as.numeric(normalized_losses),
+         num_of_doors = as.numeric(num_of_doors),
+         num_of_cylinders = as.numeric(num_of_cylinders),
+         bore = as.numeric(bore),
+         stroke = as.numeric(stroke),
+         horsepower = as.numeric(horsepower),
+         peak_rpm = as.numeric(peak_rpm),
+         price = as.numeric(price)
+         )
+
+# check the datatype of each column
+sapply(cars, typeof)
+```
+
+```{r}
+# remove missing values from the cars dataset
+cars <- cars %>%
+  drop_na()
+
+# check if there is still any missing values
+sum(is.na(cars))
+```
+
+```{r}
+# display the first ten rows of the cleaned dataset
+head(cars, 10)
+```
+
+**Data exploration**
+
+First, we need to investigate how the different features are associated with the price variable to see how useful each feature  might be to predicting our target variable. 
+
+```{r}
+# use the featurePlot() function to create a plot of the dataset
+featurePlot(x = cars[1:17],
+            y = cars$price,
+            plot = "scatter")
+```
+
+**Observations:**
+
+- From the plot above, we can see positive relationships between price and the following features: horsepower, curb_weight, engine_size, wheel_base, length, and width. This makes sens since we know that more horsepower and bigger engine size for example increase a car's price.   
+- On the other hand, we see negative relationships between those features: highway_mpg and city_mpg and the target variable. The price tends to decrease with a higher mpg.   
+
+Next, let's visualize the distribution of the price variable.
+
+```{r}
+# visualize the distribution of the price variable
+ggplot(data = cars,
+       aes(x = price)) +
+  geom_density()
+```
+
+From the density plot, we can say that the variable price is skewed which indicates the presence of outliers which can impact our prediction model negatively. One way to deal with outliers is to remove them. In our case, we can remove every value higher than 20000. This can help reduce the skewness of the data.
+
+```{r}
+# remove values higher than 20000 for the price variable
+cars <- cars %>%
+  filter(price < 20000)
+
+# visualize the distribution of the price variable
+ggplot(data = cars,
+       aes(x = price)) +
+  geom_density()
+```
+```{r}
+# print the number of observations left
+nrow(cars)
+```
+
+After removing the missing values and some outliers, the number of observations went down from 205 to 146.
+
+
+**Split the data into training and test datasets**
+
+The data is prepared and we now have a better idea of how each feature relates to the target variable price. The next step we need to take is to split the data into training and test sets. 
+
+```{r}
+# split the data into training and test sets with a ratio of 80:20
+set.seed(1)
+train_indices <- createDataPartition(y = cars$price,
+                                     p = 0.8,
+                                     list = FALSE)
+train_set <- cars[train_indices, ]
+test_set <- cars[-train_indices, ]
+
+# check the size of the training and test sets
+paste("Size of the training set is:", nrow(train_set), "rows and", ncol(train_set), "columns")
+paste("Size of the test set is:", nrow(test_set), "rows and", ncol(test_set), "columns")
+```
+
+The size of the training and test sets matches our expectations.
+
+
+**Building the model**
+
+In this step, we'll build our k-NN training model. We'll use the GridSearch method for hyperparameter optimization. 
+
+```{r}
+# define the number of k-folds for cross-validation
+train_control <- trainControl(method = "cv", number = 10)
+
+# design the parameter tuning grid
+grid <- expand.grid(k = 1:20)
+
+# train the model
+knn_model <- train(price ~.,
+                   data = train_set,
+                   method = "knn",
+                   trControl = train_control,
+                   tuneGrid = grid,
+                   preProcess = c("center", "scale"))
+
+# put the knn model into the plot() function to show how each of the hyperparameters performs
+plot(knn_model)
+```
+
+From the plot above, we can clearly see that the best performance in the training set with the lowest error is obtained with k = 4 neighbors.  
+
+
+**Prediction and model evaluation**
+
+Finally, it's time to make our predictions and evaluate the model against the test data. I use the postResample() function for that.
+
+```{r}
+# evaluate model performance with the postResample() function
+predictions <- predict(knn_model, newdata = test_set)
+postResample(pred = predictions, obs = test_set$price)
+```
+
+**Conclusion**
+
+The R-squared is about 82% and the RMSE is approximately 1759.86 which corresponds to the k = 4 neighbors shown in the previous graph. 
